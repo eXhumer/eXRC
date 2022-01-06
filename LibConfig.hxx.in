@@ -1,0 +1,7 @@
+#ifndef LIB_CONFIG_HXX
+#define LIB_CONFIG_HXX
+
+#define LIB_NAME "@PROJECT_NAME@"
+#define LIB_VERSION  "@PROJECT_VERSION@"
+
+#endif // LIB_CONFIG_HXX
