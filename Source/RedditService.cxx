@@ -8,9 +8,8 @@
 // Service is hardcoded to use http://localhost:65010/auth_callback as
 // authorization callback
 namespace eXRC::Service {
-Reddit::Reddit(QString clientId, QString token, QDateTime expAt,
-               QString refreshToken, QNetworkAccessManager *nam,
-               QObject *parent)
+Reddit::Reddit(QString clientId, QNetworkAccessManager *nam, QString token,
+               QDateTime expAt, QString refreshToken, QObject *parent)
     : Reddit(clientId, nam, parent) {
   m_authData->setToken(token);
   m_authData->setRefreshToken(refreshToken);
@@ -19,9 +18,6 @@ Reddit::Reddit(QString clientId, QString token, QDateTime expAt,
 
 Reddit::Reddit(QString clientId, QNetworkAccessManager *nam, QObject *parent)
     : QObject(parent) {
-  if (nam == nullptr)
-    nam = new QNetworkAccessManager;
-
   m_nam = nam;
   m_authData = new RedditAuthorizationData;
   m_authFlow = new QOAuth2AuthorizationCodeFlow;

@@ -19,8 +19,8 @@ private:
   QOAuth2AuthorizationCodeFlow *m_authFlow;
 
 public:
-  Reddit(QString clientId, QString token, QDateTime expAt,
-         QString refreshToken = QString(), QNetworkAccessManager *nam = nullptr,
+  Reddit(QString clientId, QNetworkAccessManager *nam, QString token,
+         QDateTime expAt, QString refreshToken = QString(),
          QObject *parent = nullptr);
   Reddit(QString clientId, QNetworkAccessManager *nam = nullptr,
          QObject *parent = nullptr);
