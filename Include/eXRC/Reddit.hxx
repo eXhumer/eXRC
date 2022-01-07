@@ -13,6 +13,7 @@ class Reddit : public QObject {
   Q_OBJECT
 
 private:
+  static QString baseUrl;
   RedditAuthorizationData *m_authData;
   QNetworkAccessManager *m_nam;
   QOAuthHttpServerReplyHandler *m_replyHandler;

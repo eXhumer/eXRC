@@ -5,9 +5,9 @@
 #include <QDesktopServices>
 #include <QUrlQuery>
 
-// Service is hardcoded to use http://localhost:65010/auth_callback as
-// authorization callback
 namespace eXRC::Service {
+QString Reddit::baseUrl("https://www.reddit.com");
+
 Reddit::Reddit(QString clientId, QNetworkAccessManager *nam, QString token,
                QDateTime expAt, QString refreshToken, QObject *parent)
     : Reddit(clientId, nam, parent) {
@@ -20,16 +20,14 @@ Reddit::Reddit(QString clientId, QNetworkAccessManager *nam, QObject *parent)
     : QObject(parent) {
   m_nam = nam;
   m_authData = new RedditAuthorizationData;
-  m_authFlow = new QOAuth2AuthorizationCodeFlow;
-  m_authFlow->setAccessTokenUrl(
-      QUrl("https://www.reddit.com/api/v1/access_token"));
-  m_authFlow->setAuthorizationUrl(
-      QUrl("https://www.reddit.com/api/v1/authorize"));
+  m_replyHandler = new QOAuthHttpServerReplyHandler(65010);
+  m_replyHandler->setCallbackPath("auth_callback");
+  m_authFlow = new QOAuth2AuthorizationCodeFlow(m_nam);
+  m_authFlow->setAccessTokenUrl(QUrl(baseUrl + "/api/v1/access_token"));
+  m_authFlow->setAuthorizationUrl(QUrl(baseUrl + "/api/v1/authorize"));
   m_authFlow->setClientIdentifier(clientId);
   m_authFlow->setScope("identity");
   m_authFlow->setUserAgent(LIB_NAME "/" LIB_VERSION);
-  m_replyHandler = new QOAuthHttpServerReplyHandler(65010);
-  m_replyHandler->setCallbackPath("auth_callback");
   m_authFlow->setReplyHandler(m_replyHandler);
 
   connect(m_authFlow, &QOAuth2AuthorizationCodeFlow::authorizeWithBrowser,
@@ -78,14 +76,19 @@ void Reddit::grant(bool permanent) {
 }
 
 void Reddit::revoke() {
-  if (!m_authData->token().isEmpty()) {
+  if (!m_authData->refreshToken().isEmpty() || !m_authData->token().isEmpty()) {
     QUrlQuery revokeData;
-    revokeData.addQueryItem("token", m_authData->token());
-    revokeData.addQueryItem("token_token_hint", "access_token");
+    revokeData.addQueryItem("token", m_authData->refreshToken().isEmpty()
+                                         ? m_authData->token()
+                                         : m_authData->refreshToken());
+    revokeData.addQueryItem("token_token_hint",
+                            m_authData->refreshToken().isEmpty()
+                                ? "access_token"
+                                : "refresh_token");
 
-    QNetworkReply *res = m_nam->post(
-        QNetworkRequest(QUrl("https://www.reddit.com/api/v1/revoke_token")),
-        revokeData.toString(QUrl::FullyEncoded).toUtf8());
+    QNetworkReply *res =
+        m_nam->post(QNetworkRequest(QUrl(baseUrl + "/api/v1/revoke_token")),
+                    revokeData.toString(QUrl::FullyEncoded).toUtf8());
 
     connect(m_nam, &QNetworkAccessManager::authenticationRequired, this,
             [this, res](QNetworkReply *reply, QAuthenticator *authenticator) {
@@ -102,39 +105,14 @@ void Reddit::revoke() {
       }
 
       m_authData->setExpirationAt(QDateTime());
+      m_authData->setRefreshToken(QString());
       m_authData->setToken(QString());
 
-      if (!m_authData->refreshToken().isEmpty()) {
-        QUrlQuery revokeData;
-        revokeData.addQueryItem("token", m_authData->refreshToken());
-        revokeData.addQueryItem("token_token_hint", "refresh_token");
-
-        QNetworkReply *res = m_nam->post(
-            QNetworkRequest(QUrl("https://www.reddit.com/api/v1/revoke_token")),
-            revokeData.toString(QUrl::FullyEncoded).toUtf8());
-
-        connect(
-            m_nam, &QNetworkAccessManager::authenticationRequired, this,
-            [this, res](QNetworkReply *reply, QAuthenticator *authenticator) {
-              if (res == reply) {
-                authenticator->setUser(m_authFlow->clientIdentifier());
-                authenticator->setPassword("");
-              }
-            });
-
-        connect(res, &QNetworkReply::finished, this, [this, res]() {
-          if (res->error() != QNetworkReply::NoError) {
-            emit this->revokeError(res->errorString());
-            return;
-          }
-
-          m_authData->setRefreshToken(QString());
-          emit this->revoked();
-        });
-
-      } else
-        emit this->revoked();
+      emit this->revoked();
     });
   }
+
+  else
+    emit this->revokeError("No token available to revoke!");
 }
 } // namespace eXRC::Service
