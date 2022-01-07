@@ -24,6 +24,10 @@ public:
          QObject *parent = nullptr);
   Reddit(QString clientId, QNetworkAccessManager *nam = nullptr,
          QObject *parent = nullptr);
+  QString token() const;
+  QString refreshToken() const;
+  QDateTime expirationAt() const;
+  bool expired() const;
 
 private slots:
   void onGranted();

@@ -40,6 +40,14 @@ Reddit::Reddit(QString clientId, QNetworkAccessManager *nam, QObject *parent)
           &Reddit::grantError);
 }
 
+QString Reddit::token() const { return m_authData->token(); }
+
+QString Reddit::refreshToken() const { return m_authData->refreshToken(); }
+
+QDateTime Reddit::expirationAt() const { return m_authData->expirationAt(); }
+
+bool Reddit::expired() const { return m_authData->expired(); }
+
 void Reddit::onGranted() {
   m_authData->setExpirationAt(m_authFlow->expirationAt());
   m_authData->setRefreshToken(m_authFlow->refreshToken());
@@ -70,17 +78,16 @@ void Reddit::grant(bool permanent) {
 }
 
 void Reddit::revoke() {
-  if (!m_authFlow->token().isEmpty()) {
+  if (!m_authData->token().isEmpty()) {
     QUrlQuery revokeData;
     revokeData.addQueryItem("token", m_authData->token());
     revokeData.addQueryItem("token_token_hint", "access_token");
 
-    QNetworkReply *res = m_authFlow->networkAccessManager()->post(
+    QNetworkReply *res = m_nam->post(
         QNetworkRequest(QUrl("https://www.reddit.com/api/v1/revoke_token")),
         revokeData.toString(QUrl::FullyEncoded).toUtf8());
 
-    connect(m_authFlow->networkAccessManager(),
-            &QNetworkAccessManager::authenticationRequired, this,
+    connect(m_nam, &QNetworkAccessManager::authenticationRequired, this,
             [this, res](QNetworkReply *reply, QAuthenticator *authenticator) {
               if (res == reply) {
                 authenticator->setUser(m_authFlow->clientIdentifier());
@@ -102,13 +109,12 @@ void Reddit::revoke() {
         revokeData.addQueryItem("token", m_authData->refreshToken());
         revokeData.addQueryItem("token_token_hint", "refresh_token");
 
-        QNetworkReply *res = m_authFlow->networkAccessManager()->post(
+        QNetworkReply *res = m_nam->post(
             QNetworkRequest(QUrl("https://www.reddit.com/api/v1/revoke_token")),
             revokeData.toString(QUrl::FullyEncoded).toUtf8());
 
         connect(
-            m_authFlow->networkAccessManager(),
-            &QNetworkAccessManager::authenticationRequired, this,
+            m_nam, &QNetworkAccessManager::authenticationRequired, this,
             [this, res](QNetworkReply *reply, QAuthenticator *authenticator) {
               if (res == reply) {
                 authenticator->setUser(m_authFlow->clientIdentifier());
