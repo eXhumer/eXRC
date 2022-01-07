@@ -94,7 +94,7 @@ void Reddit::revoke() {
 
     connect(res, &QNetworkReply::finished, this, [this, res]() {
       if (res->error() != QNetworkReply::NoError) {
-        emit this->revokeError(res->error(), res->errorString());
+        emit this->revokeError(res->errorString());
         return;
       }
 
@@ -122,7 +122,7 @@ void Reddit::revoke() {
 
         connect(res, &QNetworkReply::finished, this, [this, res]() {
           if (res->error() != QNetworkReply::NoError) {
-            emit this->revokeError(res->error(), res->errorString());
+            emit this->revokeError(res->errorString());
             return;
           }
 

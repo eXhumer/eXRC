@@ -39,8 +39,7 @@ signals:
                   const QUrl &uri);
   void grantExpired();
   void revoked();
-  void revokeError(const QNetworkReply::NetworkError &error,
-                   const QString &errorString);
+  void revokeError(const QString &error);
 };
 } // namespace eXRC::Service
 
