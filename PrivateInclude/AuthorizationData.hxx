@@ -1,21 +1,21 @@
-#ifndef REDDITAUTHORIZATIONDATA_HXX
-#define REDDITAUTHORIZATIONDATA_HXX
+#ifndef AUTHORIZATIONDATA_HXX
+#define AUTHORIZATIONDATA_HXX
 
 #include <QDateTime>
 #include <QObject>
 #include <QString>
 
-class RedditAuthorizationData : public QObject {
+class AuthorizationData : public QObject {
 private:
   QDateTime m_expirationAt;
   QString m_refreshToken;
   QString m_token;
 
 public:
-  RedditAuthorizationData(QDateTime expirationAt, QString token,
-                          QString refreshToken = QString(),
-                          QObject *parent = nullptr);
-  RedditAuthorizationData(QObject *parent = nullptr);
+  AuthorizationData(QDateTime expirationAt, QString token,
+                    QString refreshToken = QString(),
+                    QObject *parent = nullptr);
+  AuthorizationData(QObject *parent = nullptr);
   bool expired() const;
   QDateTime expirationAt() const;
   QString refreshToken() const;
@@ -25,4 +25,4 @@ public:
   void setExpirationAt(QDateTime expirationAt);
 };
 
-#endif // REDDITAUTHORIZATIONDATA_HXX
+#endif // AUTHORIZATIONDATA_HXX

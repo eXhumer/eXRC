@@ -17,7 +17,7 @@ LIB_MOC
 add_library(
 ${PROJECT_NAME}
     ${LIB_MOC}
-    Source/RedditAuthorizationData.cxx
+    Source/AuthorizationData.cxx
     Source/RedditService.cxx
 )
 
