@@ -59,9 +59,10 @@ void Reddit::authenticatedPostUrl(const QString &url, const QString &title,
                                   const QString &subreddit,
                                   const QString &flairId) {
   QUrlQuery postData{
-      {"api_json", "json"},           {"kind", "link"},     {"nsfw", "false"},
-      {"sendreplies", "false"},       {"spoiler", "false"}, {"title", title},
-      {"validate_on_submit", "true"},
+      {"api_type", "json"}, {"kind", "link"},
+      {"nsfw", "false"},    {"sendreplies", "false"},
+      {"spoiler", "false"}, {"title", title},
+      {"url", url},         {"validate_on_submit", "true"},
   };
 
   if (!subreddit.isEmpty()) {
@@ -86,17 +87,15 @@ void Reddit::authenticatedPostUrl(const QString &url, const QString &title,
   QNetworkReply *postResp =
       m_nam->post(postReq, postData.toString(QUrl::FullyEncoded).toUtf8());
 
-  connect(postResp, &QNetworkReply::finished, this, [this, postResp, &url]() {
+  connect(postResp, &QNetworkReply::finished, this, [this, postResp, url]() {
     if (postResp->error() != QNetworkReply::NoError) {
       emit this->postUrlError(url, postResp->errorString());
       return;
     }
 
-    QString redditUrl = QJsonDocument::fromJson(postResp->readAll())
-                            .object()["json"]
-                            .toObject()["data"]
-                            .toObject()["url"]
-                            .toString();
+    QJsonObject obj = QJsonDocument::fromJson(postResp->readAll()).object();
+    QString redditUrl =
+        obj["json"].toObject()["data"].toObject()["url"].toString();
 
     emit this->postedUrl(url, redditUrl);
   });
@@ -164,7 +163,7 @@ void Reddit::postUrl(const QString &url, const QString &title,
     QObject *postCtx = new QObject;
     connect(
         this, &Reddit::ready, postCtx,
-        [this, postCtx, &url, &title, &subreddit,
+        [this, postCtx, url, title, subreddit,
          &flairId](const QJsonObject &identity) {
           authenticatedPostUrl(url, title, subreddit, flairId);
           postCtx->deleteLater();
