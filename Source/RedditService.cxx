@@ -164,7 +164,7 @@ void Reddit::postUrl(const QString &url, const QString &title,
     connect(
         this, &Reddit::ready, postCtx,
         [this, postCtx, url, title, subreddit,
-         &flairId](const QJsonObject &identity) {
+         flairId](const QJsonObject &identity) {
           authenticatedPostUrl(url, title, subreddit, flairId);
           postCtx->deleteLater();
         },
