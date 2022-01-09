@@ -161,8 +161,6 @@ void Reddit::postUrl(const QString &url, const QString &title,
     authenticatedPostUrl(url, title, subreddit, flairId);
 
   else {
-    onTokenExpiry();
-
     QObject *postCtx = new QObject;
     connect(
         this, &Reddit::ready, postCtx,
@@ -175,6 +173,8 @@ void Reddit::postUrl(const QString &url, const QString &title,
     connect(
         this, &Reddit::grantExpired, postCtx, [postCtx]() { delete postCtx; },
         Qt::UniqueConnection);
+
+    onTokenExpiry();
   }
 }
 
