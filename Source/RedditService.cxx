@@ -16,7 +16,12 @@ Reddit::Reddit(QString clientId, QNetworkAccessManager *nam, QString token,
   m_authData->setToken(token);
   m_authData->setRefreshToken(refreshToken);
   m_authData->setExpirationAt(expAt);
-  fetchIdentity();
+
+  if (expired())
+    onTokenExpiry();
+
+  else
+    fetchIdentity();
 }
 
 Reddit::Reddit(QString clientId, QNetworkAccessManager *nam, QObject *parent)
