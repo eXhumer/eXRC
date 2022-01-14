@@ -52,7 +52,8 @@ public:
 
 private slots:
   void authenticatedPostUrl(const QString &url, const QString &title,
-                            const QString &subreddit, const QString &flairId);
+                            const QString &subreddit, const QString &flairId,
+                            bool sendReplies, bool nsfw, bool spoiler);
   void fetchIdentity();
   void onGranted();
   void onTokenExpiry();
@@ -60,7 +61,8 @@ private slots:
 public slots:
   void grant(bool permanent);
   void postUrl(const QString &url, const QString &title,
-               const QString &subreddit, const QString &flairId);
+               const QString &subreddit, const QString &flairId,
+               bool sendReplies, bool nsfw, bool spoiler);
   void revoke();
 
 signals:

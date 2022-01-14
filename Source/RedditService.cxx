@@ -74,12 +74,17 @@ bool Reddit::expired() const { return m_authData->expired(); }
 
 void Reddit::authenticatedPostUrl(const QString &url, const QString &title,
                                   const QString &subreddit,
-                                  const QString &flairId) {
+                                  const QString &flairId, bool sendReplies,
+                                  bool nsfw, bool spoiler) {
   QUrlQuery postData{
-      {"api_type", "json"}, {"kind", "link"},
-      {"nsfw", "false"},    {"sendreplies", "false"},
-      {"spoiler", "false"}, {"title", title},
-      {"url", url},         {"validate_on_submit", "true"},
+      {"api_type", "json"},
+      {"kind", "link"},
+      {"nsfw", nsfw ? "true" : "false"},
+      {"sendreplies", sendReplies ? "true" : "false"},
+      {"spoiler", spoiler ? "true" : "false"},
+      {"title", title},
+      {"url", url},
+      {"validate_on_submit", "true"},
   };
 
   if (!subreddit.isEmpty()) {
@@ -172,17 +177,20 @@ void Reddit::grant(bool permanent) {
 }
 
 void Reddit::postUrl(const QString &url, const QString &title,
-                     const QString &subreddit, const QString &flairId) {
+                     const QString &subreddit, const QString &flairId,
+                     bool sendReplies, bool nsfw, bool spoiler) {
   if (!expired())
-    authenticatedPostUrl(url, title, subreddit, flairId);
+    authenticatedPostUrl(url, title, subreddit, flairId, sendReplies, nsfw,
+                         spoiler);
 
   else {
     QObject *postCtx = new QObject;
     connect(
         this, &Reddit::ready, postCtx,
-        [this, postCtx, url, title, subreddit,
-         flairId](const QJsonObject &identity) {
-          authenticatedPostUrl(url, title, subreddit, flairId);
+        [this, postCtx, url, title, subreddit, flairId, sendReplies, nsfw,
+         spoiler](const QJsonObject &identity) {
+          authenticatedPostUrl(url, title, subreddit, flairId, sendReplies,
+                               nsfw, spoiler);
           postCtx->deleteLater();
         },
         Qt::UniqueConnection);
