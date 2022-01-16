@@ -22,6 +22,7 @@
 #include <QDesktopServices>
 #include <QFile>
 #include <QFileInfo>
+#include <QHttpMultiPart>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QMimeDatabase>
@@ -415,25 +416,24 @@ void Reddit::onTokenExpiry() {
 }
 
 void Reddit::uploadMedia(QFile *mediaFile) {
-  QFileInfo mediaFileInfo(*mediaFile);
+  QString mediaFileName = QFileInfo(*mediaFile).fileName();
+  QString mediaMimeType = QMimeDatabase().mimeTypeForFile(mediaFileName).name();
 
   QNetworkRequest postAssetDataReq(QUrl(oauthUrl + "/api/media/asset"));
   postAssetDataReq.setRawHeader("Authorization",
                                 ("bearer " + token()).toUtf8());
 
-  QNetworkReply *postAssetDataRes = m_nam->post(
-      postAssetDataReq,
-      QUrlQuery{
-          {"filepath", mediaFileInfo.fileName()},
-          {"mimetype",
-           QMimeDatabase().mimeTypeForFile(mediaFileInfo.fileName()).name()}}
-          .toString(QUrl::FullyEncoded)
-          .toUtf8());
+  QNetworkReply *postAssetDataRes =
+      m_nam->post(postAssetDataReq, QUrlQuery{{"filepath", mediaFileName},
+                                              {"mimetype", mediaMimeType}}
+                                        .toString(QUrl::FullyEncoded)
+                                        .toUtf8());
 
   QObject *uploadCtx = new QObject;
   connect(
       postAssetDataRes, &QNetworkReply::finished, uploadCtx,
-      [this, mediaFile, postAssetDataRes, uploadCtx]() {
+      [this, mediaFile, mediaFileName, mediaMimeType, postAssetDataRes,
+       uploadCtx]() {
         if (postAssetDataRes->error() != QNetworkReply::NoError) {
           emit this->mediaUploadError(mediaFile,
                                       postAssetDataRes->errorString());
@@ -450,7 +450,60 @@ void Reddit::uploadMedia(QFile *mediaFile) {
         QString uploadAssetId =
             assetUploadCredential["asset"].toObject()["asset_id"].toString();
 
-        // TODO: Stuff
+        QHttpMultiPart *uploadMultiPart =
+            new QHttpMultiPart(QHttpMultiPart::FormDataType);
+        QString uploadKey;
+
+        for (const auto &field : uploadFields) {
+          QJsonObject fieldObj = field.toObject();
+
+          if (fieldObj["name"].toString() == "key")
+            uploadKey = fieldObj["value"].toString();
+
+          QHttpPart fieldPart;
+          fieldPart.setHeader(QNetworkRequest::ContentDispositionHeader,
+                              QVariant("form-data; name=\"" +
+                                       fieldObj["name"].toString() + "\""));
+          fieldPart.setBody(fieldObj["value"].toString().toUtf8());
+          uploadMultiPart->append(fieldPart);
+        }
+
+        QHttpPart videoFilePart;
+        videoFilePart.setHeader(QNetworkRequest::ContentTypeHeader,
+                                QVariant(mediaMimeType));
+        videoFilePart.setHeader(
+            QNetworkRequest::ContentDispositionHeader,
+            QVariant("form-data; name=\"file\"; filename=\"" + mediaFileName +
+                     "\""));
+        mediaFile->open(QIODevice::ReadOnly);
+        videoFilePart.setBodyDevice(mediaFile);
+        mediaFile->setParent(uploadMultiPart);
+        uploadMultiPart->append(videoFilePart);
+
+        QNetworkRequest uploadReq(QUrl("https:" + uploadAction));
+        uploadReq.setRawHeader("Authorization",
+                               ("bearer " + m_authData->token()).toUtf8());
+        QNetworkReply *uploadRes = m_nam->post(uploadReq, uploadMultiPart);
+        connect(uploadRes, &QNetworkReply::uploadProgress, this,
+                [this, mediaFile](qint64 bytesSent, qint64 bytesTotal) {
+                  emit this->mediaUploadProgress(mediaFile, bytesSent,
+                                                 bytesTotal);
+                });
+        connect(uploadRes, &QNetworkReply::finished, this,
+                [this, mediaFile, uploadAction, uploadAssetId, uploadKey,
+                 uploadRes]() {
+                  if (uploadRes->error() != QNetworkReply::NoError) {
+                    emit this->mediaUploadError(mediaFile,
+                                                uploadRes->errorString());
+                    return;
+                  }
+
+                  emit this->mediaUploaded(
+                      mediaFile, "https:" + uploadAction + "/" + uploadKey,
+                      uploadAssetId);
+                });
+        connect(uploadRes, &QNetworkReply::finished, uploadRes,
+                &QNetworkReply::deleteLater);
       });
   connect(postAssetDataRes, &QNetworkReply::finished, postAssetDataRes,
           &QNetworkReply::deleteLater);
