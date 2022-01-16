@@ -19,7 +19,6 @@
 #define AUTHORIZATIONDATA_HXX
 
 #include <QDateTime>
-#include <QObject>
 #include <QString>
 
 class AuthorizationData : public QObject {

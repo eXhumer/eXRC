@@ -20,12 +20,64 @@
 #include "Reddit.hxx"
 #include <QAuthenticator>
 #include <QDesktopServices>
+#include <QFile>
+#include <QFileInfo>
+#include <QJsonArray>
 #include <QJsonDocument>
+#include <QMimeDatabase>
+#include <QNetworkAccessManager>
+#include <QNetworkReply>
+#include <QNetworkRequest>
+#include <QOAuth2AuthorizationCodeFlow>
+#include <QOAuthHttpServerReplyHandler>
 #include <QUrlQuery>
+#include <QWebSocket>
 
 namespace eXRC::Service {
 QString Reddit::baseUrl("https://www.reddit.com");
 QString Reddit::oauthUrl("https://oauth.reddit.com");
+
+QNetworkReply *Reddit::submitMedia(const QString *mediaUrl,
+                                   const QString &title,
+                                   const QString &subreddit,
+                                   const QString &flairId, bool sendReplies,
+                                   bool nsfw, bool spoiler,
+                                   QString *thumbnailUrl) {
+  QUrlQuery postData{
+      {"api_type", "json"},
+      {"kind", thumbnailUrl == nullptr ? "image" : "video"},
+      {"nsfw", nsfw ? "true" : "false"},
+      {"sendreplies", sendReplies ? "true" : "false"},
+      {"spoiler", spoiler ? "true" : "false"},
+      {"title", title},
+      {"url", *mediaUrl},
+      {"validate_on_submit", "true"},
+  };
+
+  if (!subreddit.isEmpty()) {
+    postData.addQueryItem("sr", subreddit);
+    postData.addQueryItem("submit_type", "subreddit");
+
+    if (!flairId.isEmpty())
+      postData.addQueryItem("flair_id", flairId);
+  } else {
+    postData.addQueryItem("sr", "u_" + m_idenJsonObj["name"].toString());
+    postData.addQueryItem("submit_type", "profile");
+  }
+
+  if (thumbnailUrl != nullptr)
+    postData.addQueryItem("video_poster_url", *thumbnailUrl);
+
+  QUrl postUrl(oauthUrl + "/api/submit");
+  postUrl.setQuery(QUrlQuery{
+      {"raw_json", "1"},
+      {"resubmit", "true"},
+  });
+  QNetworkRequest postReq(postUrl);
+  postReq.setRawHeader("Authorization", ("bearer " + token()).toUtf8());
+
+  return m_nam->post(postReq, postData.toString(QUrl::FullyEncoded).toUtf8());
+}
 
 Reddit::Reddit(QString clientId, QNetworkAccessManager *nam, QString token,
                QDateTime expAt, QString refreshToken, QObject *parent)
@@ -71,6 +123,206 @@ QString Reddit::refreshToken() const { return m_authData->refreshToken(); }
 QDateTime Reddit::expirationAt() const { return m_authData->expirationAt(); }
 
 bool Reddit::expired() const { return m_authData->expired(); }
+
+void Reddit::authenticatedPostMedia(QFile *mediaFile, QFile *videoThumbnailFile,
+                                    const QString &title,
+                                    const QString &subreddit,
+                                    const QString &flairId, bool sendReplies,
+                                    bool nsfw, bool spoiler) {
+  QString mediaMimeType =
+      QMimeDatabase()
+          .mimeTypeForFile(QFileInfo(*videoThumbnailFile).fileName())
+          .name();
+
+  if (!(mediaMimeType.startsWith("image/") ||
+        mediaMimeType.startsWith("video/"))) {
+    emit this->postMediaError(mediaFile, videoThumbnailFile,
+                              "Unsupported media file mimetype! Only "
+                              "supports image and video files!");
+    return;
+  }
+
+  if (mediaMimeType.startsWith("video/") and videoThumbnailFile == nullptr)
+    videoThumbnailFile = new QFile(":/VideoPoster.png");
+
+  if (mediaMimeType.startsWith("video/")) {
+    QString *mediaUrl = new QString;
+    QString *thumbnailUrl = new QString;
+    QObject *videoCtx = new QObject;
+
+    connect(
+        this, &Reddit::mediaUploaded, videoCtx,
+        [this, flairId, mediaFile, mediaUrl, nsfw, sendReplies, spoiler,
+         subreddit, thumbnailUrl, title, videoCtx, videoThumbnailFile](
+            QFile *uploadedFile, const QString &url, const QString &assetId) {
+          if (uploadedFile == mediaFile || uploadedFile == videoThumbnailFile) {
+            if (uploadedFile == videoThumbnailFile) {
+              *thumbnailUrl = url;
+
+              if (mediaUrl->isNull())
+                return;
+            } else {
+              *mediaUrl = url;
+
+              if (thumbnailUrl->isNull())
+                return;
+            }
+
+            QNetworkReply *submitResp =
+                submitMedia(mediaUrl, title, subreddit, flairId, sendReplies,
+                            nsfw, spoiler, thumbnailUrl);
+
+            connect(
+                submitResp, &QNetworkReply::finished, videoCtx,
+                [this, mediaFile, submitResp, videoCtx, videoThumbnailFile]() {
+                  if (submitResp->error() != QNetworkReply::NoError) {
+
+                    emit this->postMediaError(mediaFile, videoThumbnailFile,
+                                              submitResp->errorString());
+                    videoCtx->deleteLater();
+                    return;
+                  }
+
+                  QString uploadWebSocketUrl =
+                      QJsonDocument::fromJson(submitResp->readAll())
+                          .object()["json"]
+                          .toObject()["data"]
+                          .toObject()["websocket_url"]
+                          .toString();
+
+                  QObject *wsCtx = new QObject;
+                  QWebSocket *mediaWS = new QWebSocket(
+                      QString(), QWebSocketProtocol::VersionLatest, wsCtx);
+                  connect(
+                      mediaWS, &QWebSocket::connected, wsCtx,
+                      [this, mediaFile, mediaWS, videoThumbnailFile, wsCtx]() {
+                        connect(mediaWS, &QWebSocket::binaryMessageReceived,
+                                wsCtx,
+                                [this, mediaFile, mediaWS, videoThumbnailFile,
+                                 wsCtx](const QByteArray &message) {
+                                  QJsonObject wsMsg =
+                                      QJsonDocument::fromJson(message).object();
+
+                                  mediaWS->close();
+
+                                  if (wsMsg["type"].toString() == "failed") {
+                                    emit this->postMediaError(
+                                        mediaFile, videoThumbnailFile,
+                                        QString(QJsonDocument(wsMsg).toJson(
+                                            QJsonDocument::Indented)));
+                                    wsCtx->deleteLater();
+                                    return;
+                                  }
+
+                                  emit this->postedMedia(
+                                      mediaFile, videoThumbnailFile,
+                                      wsMsg["payload"]
+                                          .toObject()["redirect"]
+                                          .toString());
+                                  wsCtx->deleteLater();
+                                });
+                      });
+                  mediaWS->open(QUrl(uploadWebSocketUrl));
+                  videoCtx->deleteLater();
+                });
+
+            connect(submitResp, &QNetworkReply::finished, submitResp,
+                    &QNetworkReply::deleteLater);
+          }
+        });
+
+    connect(this, &Reddit::mediaUploadError, videoCtx,
+            [mediaFile, videoCtx, videoThumbnailFile](QFile *failedMediaFile,
+                                                      const QString &error) {
+              if (failedMediaFile == mediaFile ||
+                  failedMediaFile == videoThumbnailFile)
+                videoCtx->deleteLater();
+            });
+
+    uploadMedia(videoThumbnailFile);
+    uploadMedia(mediaFile);
+  } else {
+    QObject *imageCtx = new QObject;
+
+    connect(
+        this, &Reddit::mediaUploaded, imageCtx,
+        [this, flairId, imageCtx, mediaFile, nsfw, sendReplies, spoiler,
+         subreddit, title](QFile *uploadedFile, const QString &mediaUrl,
+                           const QString &assetId) {
+          if (uploadedFile == mediaFile) {
+            QNetworkReply *submitResp =
+                submitMedia(&mediaUrl, title, subreddit, flairId, sendReplies,
+                            nsfw, spoiler);
+
+            connect(
+                submitResp, &QNetworkReply::finished, imageCtx,
+                [this, mediaFile, submitResp, imageCtx]() {
+                  if (submitResp->error() != QNetworkReply::NoError) {
+
+                    emit this->postMediaError(mediaFile, nullptr,
+                                              submitResp->errorString());
+                    imageCtx->deleteLater();
+                    return;
+                  }
+
+                  QString uploadWebSocketUrl =
+                      QJsonDocument::fromJson(submitResp->readAll())
+                          .object()["json"]
+                          .toObject()["data"]
+                          .toObject()["websocket_url"]
+                          .toString();
+
+                  QObject *wsCtx = new QObject;
+                  QWebSocket *mediaWS = new QWebSocket(
+                      QString(), QWebSocketProtocol::VersionLatest, wsCtx);
+                  connect(
+                      mediaWS, &QWebSocket::connected, wsCtx,
+                      [this, mediaFile, mediaWS, wsCtx]() {
+                        connect(
+                            mediaWS, &QWebSocket::binaryMessageReceived, wsCtx,
+                            [this, mediaFile, mediaWS,
+                             wsCtx](const QByteArray &message) {
+                              QJsonObject wsMsg =
+                                  QJsonDocument::fromJson(message).object();
+
+                              mediaWS->close();
+
+                              if (wsMsg["type"].toString() == "failed") {
+                                emit this->postMediaError(
+                                    mediaFile, nullptr,
+                                    QString(QJsonDocument(wsMsg).toJson(
+                                        QJsonDocument::Indented)));
+                                wsCtx->deleteLater();
+                                return;
+                              }
+
+                              emit this->postedMedia(mediaFile, nullptr,
+                                                     wsMsg["payload"]
+                                                         .toObject()["redirect"]
+                                                         .toString());
+                              wsCtx->deleteLater();
+                            });
+                      });
+
+                  mediaWS->open(QUrl(uploadWebSocketUrl));
+                  imageCtx->deleteLater();
+                });
+
+            connect(submitResp, &QNetworkReply::finished, submitResp,
+                    &QNetworkReply::deleteLater);
+          }
+        });
+
+    connect(
+        this, &Reddit::mediaUploadError, imageCtx,
+        [mediaFile, imageCtx](QFile *failedMediaFile, const QString &error) {
+          if (failedMediaFile == mediaFile)
+            imageCtx->deleteLater();
+        });
+
+    uploadMedia(mediaFile);
+  }
+}
 
 void Reddit::authenticatedPostUrl(const QString &url, const QString &title,
                                   const QString &subreddit,
@@ -162,6 +414,48 @@ void Reddit::onTokenExpiry() {
   }
 }
 
+void Reddit::uploadMedia(QFile *mediaFile) {
+  QFileInfo mediaFileInfo(*mediaFile);
+
+  QNetworkRequest postAssetDataReq(QUrl(oauthUrl + "/api/media/asset"));
+  postAssetDataReq.setRawHeader("Authorization",
+                                ("bearer " + token()).toUtf8());
+
+  QNetworkReply *postAssetDataRes = m_nam->post(
+      postAssetDataReq,
+      QUrlQuery{
+          {"filepath", mediaFileInfo.fileName()},
+          {"mimetype",
+           QMimeDatabase().mimeTypeForFile(mediaFileInfo.fileName()).name()}}
+          .toString(QUrl::FullyEncoded)
+          .toUtf8());
+
+  QObject *uploadCtx = new QObject;
+  connect(
+      postAssetDataRes, &QNetworkReply::finished, uploadCtx,
+      [this, mediaFile, postAssetDataRes, uploadCtx]() {
+        if (postAssetDataRes->error() != QNetworkReply::NoError) {
+          emit this->mediaUploadError(mediaFile,
+                                      postAssetDataRes->errorString());
+          uploadCtx->deleteLater();
+          return;
+        }
+
+        QJsonObject assetUploadCredential =
+            QJsonDocument::fromJson(postAssetDataRes->readAll()).object();
+        QString uploadAction =
+            assetUploadCredential["args"].toObject()["action"].toString();
+        QJsonArray uploadFields =
+            assetUploadCredential["args"].toObject()["fields"].toArray();
+        QString uploadAssetId =
+            assetUploadCredential["asset"].toObject()["asset_id"].toString();
+
+        // TODO: Stuff
+      });
+  connect(postAssetDataRes, &QNetworkReply::finished, postAssetDataRes,
+          &QNetworkReply::deleteLater);
+}
+
 void Reddit::grant(bool permanent) {
   if (expired() && refreshToken().isEmpty()) {
     m_authFlow->setModifyParametersFunction(
@@ -173,6 +467,34 @@ void Reddit::grant(bool permanent) {
         });
 
     m_authFlow->grant();
+  }
+}
+
+void Reddit::postMedia(QFile *mediaFile, QFile *videoThumbnailFile,
+                       const QString &title, const QString &subreddit,
+                       const QString &flairId, bool sendReplies, bool nsfw,
+                       bool spoiler) {
+  if (!expired())
+    authenticatedPostMedia(mediaFile, videoThumbnailFile, title, subreddit,
+                           flairId, sendReplies, nsfw, spoiler);
+
+  else {
+    QObject *postCtx = new QObject;
+    connect(
+        this, &Reddit::ready, postCtx,
+        [this, flairId, mediaFile, nsfw, postCtx, sendReplies, spoiler,
+         subreddit, title, videoThumbnailFile](const QJsonObject &identity) {
+          authenticatedPostMedia(mediaFile, videoThumbnailFile, title,
+                                 subreddit, flairId, sendReplies, nsfw,
+                                 spoiler);
+          postCtx->deleteLater();
+        },
+        Qt::UniqueConnection);
+    connect(
+        this, &Reddit::grantExpired, postCtx, [postCtx]() { delete postCtx; },
+        Qt::UniqueConnection);
+
+    onTokenExpiry();
   }
 }
 

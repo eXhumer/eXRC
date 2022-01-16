@@ -19,12 +19,15 @@
 #define REDDIT_SERVICE_HXX
 
 #include <QJsonObject>
-#include <QNetworkAccessManager>
-#include <QNetworkReply>
-#include <QOAuth2AuthorizationCodeFlow>
-#include <QOAuthHttpServerReplyHandler>
+#include <QObject>
 
+// Forward Declaration
 class AuthorizationData;
+class QFile;
+class QNetworkAccessManager;
+class QNetworkReply;
+class QOAuth2AuthorizationCodeFlow;
+class QOAuthHttpServerReplyHandler;
 
 namespace eXRC::Service {
 class Reddit : public QObject {
@@ -38,6 +41,10 @@ private:
   QOAuthHttpServerReplyHandler *m_replyHandler;
   QOAuth2AuthorizationCodeFlow *m_authFlow;
   QJsonObject m_idenJsonObj;
+  QNetworkReply *submitMedia(const QString *mediaUrl, const QString &title,
+                             const QString &subreddit, const QString &flairId,
+                             bool sendReplies, bool nsfw, bool spoiler,
+                             QString *thumbnailUrl = nullptr);
 
 public:
   Reddit(QString clientId, QNetworkAccessManager *nam, QString token,
@@ -51,15 +58,24 @@ public:
   bool expired() const;
 
 private slots:
+  void authenticatedPostMedia(QFile *mediaFile, QFile *videoThumbnailFile,
+                              const QString &title, const QString &subreddit,
+                              const QString &flairId, bool sendReplies,
+                              bool nsfw, bool spoiler);
   void authenticatedPostUrl(const QString &url, const QString &title,
                             const QString &subreddit, const QString &flairId,
                             bool sendReplies, bool nsfw, bool spoiler);
   void fetchIdentity();
   void onGranted();
   void onTokenExpiry();
+  void uploadMedia(QFile *mediaFile);
 
 public slots:
   void grant(bool permanent);
+  void postMedia(QFile *mediaFile, QFile *videoThumbnailFile,
+                 const QString &title, const QString &subreddit,
+                 const QString &flairId, bool sendReplies, bool nsfw,
+                 bool spoiler);
   void postUrl(const QString &url, const QString &title,
                const QString &subreddit, const QString &flairId,
                bool sendReplies, bool nsfw, bool spoiler);
@@ -69,8 +85,17 @@ signals:
   void identityFetchError(const QString &error);
   void grantError(const QString &error);
   void grantExpired();
-  void postedUrl(const QString &postUrl, const QString &redditUrl);
-  void postUrlError(const QString &postUrl, const QString &error);
+  void mediaUploaded(QFile *mediaFile, const QString &url,
+                     const QString &assetId);
+  void mediaUploadError(QFile *mediaFile, const QString &error);
+  void mediaUploadProgress(QFile *mediaFile, qint64 bytesSent,
+                           qint64 bytesTotal);
+  void postedMedia(QFile *mediaFile, QFile *videoThumbnailFile,
+                   const QString &postUrl);
+  void postMediaError(QFile *mediaFile, QFile *videoThumbnailFile,
+                      const QString &error);
+  void postedUrl(const QString &url, const QString &postUrl);
+  void postUrlError(const QString &url, const QString &error);
   void ready(const QJsonObject &identity);
   void revoked();
   void revokeError(const QString &error);
