@@ -131,9 +131,7 @@ void Reddit::authenticatedPostMedia(QFile *mediaFile, QFile *videoThumbnailFile,
                                     const QString &flairId, bool sendReplies,
                                     bool nsfw, bool spoiler) {
   QString mediaMimeType =
-      QMimeDatabase()
-          .mimeTypeForFile(QFileInfo(*videoThumbnailFile).fileName())
-          .name();
+      QMimeDatabase().mimeTypeForFile(QFileInfo(*mediaFile).fileName()).name();
 
   if (!(mediaMimeType.startsWith("image/") ||
         mediaMimeType.startsWith("video/"))) {
@@ -197,12 +195,13 @@ void Reddit::authenticatedPostMedia(QFile *mediaFile, QFile *videoThumbnailFile,
                   connect(
                       mediaWS, &QWebSocket::connected, wsCtx,
                       [this, mediaFile, mediaWS, videoThumbnailFile, wsCtx]() {
-                        connect(mediaWS, &QWebSocket::binaryMessageReceived,
+                        connect(mediaWS, &QWebSocket::textMessageReceived,
                                 wsCtx,
                                 [this, mediaFile, mediaWS, videoThumbnailFile,
-                                 wsCtx](const QByteArray &message) {
+                                 wsCtx](const QString &message) {
                                   QJsonObject wsMsg =
-                                      QJsonDocument::fromJson(message).object();
+                                      QJsonDocument::fromJson(message.toUtf8())
+                                          .object();
 
                                   mediaWS->close();
 
@@ -481,8 +480,6 @@ void Reddit::uploadMedia(QFile *mediaFile) {
         uploadMultiPart->append(videoFilePart);
 
         QNetworkRequest uploadReq(QUrl("https:" + uploadAction));
-        uploadReq.setRawHeader("Authorization",
-                               ("bearer " + m_authData->token()).toUtf8());
         QNetworkReply *uploadRes = m_nam->post(uploadReq, uploadMultiPart);
         connect(uploadRes, &QNetworkReply::uploadProgress, this,
                 [this, mediaFile](qint64 bytesSent, qint64 bytesTotal) {
