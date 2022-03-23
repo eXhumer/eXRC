@@ -104,7 +104,7 @@ Reddit::Reddit(QString clientId, QNetworkAccessManager *nam, QObject *parent)
   m_authFlow->setAccessTokenUrl(QUrl(baseUrl + "/api/v1/access_token"));
   m_authFlow->setAuthorizationUrl(QUrl(baseUrl + "/api/v1/authorize"));
   m_authFlow->setClientIdentifier(clientId);
-  m_authFlow->setScope("identity submit");
+  m_authFlow->setScope("identity submit flair");
   m_authFlow->setUserAgent(LIB_NAME "/" LIB_VERSION);
   m_authFlow->setReplyHandler(m_replyHandler);
 
@@ -324,6 +324,31 @@ void Reddit::authenticatedPostMedia(QFile *mediaFile, QFile *videoThumbnailFile,
   }
 }
 
+void Reddit::authenticatedPostRequirement(const QString &subreddit) {
+  QNetworkRequest req(
+      QUrl(oauthUrl + "/api/v1/" + subreddit + "/post_requirements"));
+  req.setRawHeader("Authorization", ("bearer " + token()).toUtf8());
+
+  QNetworkReply *resp = m_nam->get(req);
+
+  connect(resp, &QNetworkReply::finished, this, [this, resp, subreddit]() {
+    if (resp->error() != QNetworkReply::NoError) {
+      if (resp->error() == QNetworkReply::ContentNotFoundError)
+        emit this->invalidSubreddit(subreddit);
+      else
+        emit this->postRequirementError(subreddit, resp->errorString());
+
+      return;
+    }
+
+    emit this->postRequirements(subreddit,
+                                QJsonDocument::fromJson(resp->readAll())
+                                    .object()["is_flair_required"]
+                                    .toBool());
+  });
+  connect(resp, &QNetworkReply::finished, resp, &QNetworkReply::deleteLater);
+}
+
 void Reddit::authenticatedPostUrl(const QString &url, const QString &title,
                                   const QString &subreddit,
                                   const QString &flairId, bool sendReplies,
@@ -377,6 +402,25 @@ void Reddit::authenticatedPostUrl(const QString &url, const QString &title,
           &QNetworkReply::deleteLater);
 }
 
+void Reddit::authenticatedSubredditLinkFlair(const QString &subreddit) {
+  QNetworkRequest req(
+      QUrl(oauthUrl + "/r/" + subreddit + "/api/link_flair_v2"));
+  req.setRawHeader("Authorization", ("bearer " + token()).toUtf8());
+
+  QNetworkReply *resp = m_nam->get(req);
+
+  connect(resp, &QNetworkReply::finished, this, [this, resp, subreddit]() {
+    if (resp->error() != QNetworkReply::NoError) {
+      emit this->subredditLinkFlairError(subreddit, resp->errorString());
+      return;
+    }
+
+    QJsonArray flairs = QJsonDocument::fromJson(resp->readAll()).array();
+    emit this->subredditLinkFlairs(subreddit, flairs);
+  });
+  connect(resp, &QNetworkReply::finished, resp, &QNetworkReply::deleteLater);
+}
+
 void Reddit::fetchIdentity() {
   QUrl meUrl(oauthUrl + "/api/v1/me");
   meUrl.setQuery(QUrlQuery{{"raw_json", "1"}});
@@ -396,6 +440,8 @@ void Reddit::fetchIdentity() {
   connect(meResp, &QNetworkReply::finished, meResp,
           &QNetworkReply::deleteLater);
 }
+
+void authenticatedSubredditLinkFlair(const QString &subreddit) {}
 
 void Reddit::onGranted() {
   m_authData->setExpirationAt(m_authFlow->expirationAt());
@@ -548,6 +594,27 @@ void Reddit::postMedia(QFile *mediaFile, QFile *videoThumbnailFile,
   }
 }
 
+void Reddit::postRequirement(const QString &subreddit) {
+  if (!expired())
+    authenticatedPostRequirement(subreddit);
+
+  else {
+    QObject *postCtx = new QObject;
+    connect(
+        this, &Reddit::ready, postCtx,
+        [this, postCtx, subreddit](const QJsonObject &identity) {
+          authenticatedPostRequirement(subreddit);
+          postCtx->deleteLater();
+        },
+        Qt::UniqueConnection);
+    connect(
+        this, &Reddit::grantExpired, postCtx, [postCtx]() { delete postCtx; },
+        Qt::UniqueConnection);
+
+    onTokenExpiry();
+  }
+}
+
 void Reddit::postUrl(const QString &url, const QString &title,
                      const QString &subreddit, const QString &flairId,
                      bool sendReplies, bool nsfw, bool spoiler) {
@@ -563,6 +630,27 @@ void Reddit::postUrl(const QString &url, const QString &title,
          spoiler](const QJsonObject &identity) {
           authenticatedPostUrl(url, title, subreddit, flairId, sendReplies,
                                nsfw, spoiler);
+          postCtx->deleteLater();
+        },
+        Qt::UniqueConnection);
+    connect(
+        this, &Reddit::grantExpired, postCtx, [postCtx]() { delete postCtx; },
+        Qt::UniqueConnection);
+
+    onTokenExpiry();
+  }
+}
+
+void Reddit::subredditLinkFlair(const QString &subreddit) {
+  if (!expired())
+    authenticatedSubredditLinkFlair(subreddit);
+
+  else {
+    QObject *postCtx = new QObject;
+    connect(
+        this, &Reddit::ready, postCtx,
+        [this, postCtx, subreddit](const QJsonObject &identity) {
+          authenticatedSubredditLinkFlair(subreddit);
           postCtx->deleteLater();
         },
         Qt::UniqueConnection);

@@ -62,9 +62,11 @@ private slots:
                               const QString &title, const QString &subreddit,
                               const QString &flairId, bool sendReplies,
                               bool nsfw, bool spoiler);
+  void authenticatedPostRequirement(const QString &subreddit);
   void authenticatedPostUrl(const QString &url, const QString &title,
                             const QString &subreddit, const QString &flairId,
                             bool sendReplies, bool nsfw, bool spoiler);
+  void authenticatedSubredditLinkFlair(const QString &subreddit);
   void fetchIdentity();
   void onGranted();
   void onTokenExpiry();
@@ -76,13 +78,16 @@ public slots:
                  const QString &title, const QString &subreddit,
                  const QString &flairId, bool sendReplies, bool nsfw,
                  bool spoiler);
+  void postRequirement(const QString &subreddit);
   void postUrl(const QString &url, const QString &title,
                const QString &subreddit, const QString &flairId,
                bool sendReplies, bool nsfw, bool spoiler);
   void revoke();
+  void subredditLinkFlair(const QString &subreddit);
 
 signals:
   void identityFetchError(const QString &error);
+  void invalidSubreddit(const QString &subreddit);
   void grantError(const QString &error);
   void grantExpired();
   void mediaUploaded(QFile *mediaFile, const QString &url,
@@ -95,10 +100,14 @@ signals:
   void postMediaError(QFile *mediaFile, QFile *videoThumbnailFile,
                       const QString &error);
   void postedUrl(const QString &url, const QString &postUrl);
+  void postRequirements(const QString &subreddit, bool flairRequired);
+  void postRequirementError(const QString &subreddit, const QString &error);
   void postUrlError(const QString &url, const QString &error);
   void ready(const QJsonObject &identity);
   void revoked();
   void revokeError(const QString &error);
+  void subredditLinkFlairs(const QString &subreddit, const QJsonArray &flairs);
+  void subredditLinkFlairError(const QString &subreddit, const QString &error);
 };
 } // namespace eXRC::Service
 
