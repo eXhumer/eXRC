@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.22)
 
 project(eXRC
         LANGUAGES CXX
-        VERSION 1.1.0)
+        VERSION 1.2.0)
 
 configure_file(LibConfig.hxx.in LibConfig.hxx)
 
